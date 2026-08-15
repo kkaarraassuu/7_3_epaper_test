@@ -44,7 +44,7 @@ button:disabled{opacity:.45}.status{min-height:1.5em;margin:12px 0}.note{font-si
 <body><div class="card">
 <h1>Spectra 6 フォトフレーム</h1>
 <p>写真を選ぶと端末内で800×480・6色に変換します。プレビューを確認して表示してください。</p>
-<input id="file" type="file" accept="image/*">
+<input id="file" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif">
 <canvas id="canvas" width="800" height="480"></canvas>
 <div class="status" id="status">写真を選択してください。</div>
 <button id="send" disabled>e-Paperに表示</button>
@@ -75,7 +75,7 @@ function convert(){st.textContent='6色へ変換中…';send.disabled=true;setTi
  ctx.putImageData(im,0,0);packed=new Uint8Array(n/2);for(let i=0,j=0;i<n;i+=2,j++)packed[j]=(codes[i]<<4)|codes[i+1];
  st.textContent='変換完了。プレビューを確認してください。';send.disabled=false;
 },40)}
-fi.onchange=()=>{const f=fi.files[0];if(!f)return;const img=new Image();img.onload=()=>{const sr=img.width/img.height,tr=W/H;let sx=0,sy=0,sw=img.width,sh=img.height;if(sr>tr){sw=sh*tr;sx=(img.width-sw)/2}else{sh=sw/tr;sy=(img.height-sh)/2}ctx.drawImage(img,sx,sy,sw,sh,0,0,W,H);URL.revokeObjectURL(img.src);convert()};img.src=URL.createObjectURL(f)};
+fi.onchange=()=>{const f=fi.files[0];if(!f)return;packed=null;send.disabled=true;st.textContent='写真を読み込み中…';const url=URL.createObjectURL(f),img=new Image();img.onload=()=>{const sr=img.naturalWidth/img.naturalHeight,tr=W/H;let sx=0,sy=0,sw=img.naturalWidth,sh=img.naturalHeight;if(sr>tr){sw=sh*tr;sx=(img.naturalWidth-sw)/2}else{sh=sw/tr;sy=(img.naturalHeight-sh)/2}ctx.save();ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);ctx.drawImage(img,sx,sy,sw,sh,0,0,W,H);ctx.restore();URL.revokeObjectURL(url);convert()};img.onerror=()=>{URL.revokeObjectURL(url);const heic=/\.(heic|heif)$/i.test(f.name)||/hei[cf]/i.test(f.type);st.textContent=heic?'HEICを読み込めません。iOS 17以降のSafariを使うか、写真をJPEGで共有して選択してください。':'画像を読み込めません。JPEG、PNG、WebP、HEICを選択してください。'};img.src=url};
 send.onclick=async()=>{if(!packed)return;send.disabled=true;st.textContent='送信中…';try{const form=new FormData();form.append('image',new Blob([packed],{type:'application/octet-stream'}),'image.bin');const r=await fetch('/upload',{method:'POST',body:form});const t=await r.text();if(!r.ok)throw new Error(t);st.textContent=t}catch(e){st.textContent='エラー: '+e.message;send.disabled=false}};
 fetch('/status').then(r=>r.json()).then(s=>{document.querySelector('#network').textContent=s.connected?'接続中: '+s.ssid+' / アドレス: '+s.ip:'自宅Wi-Fiには未接続です。';document.querySelector('#ssid').value=s.ssid||''});
 document.querySelector('#wifi').onsubmit=async e=>{e.preventDefault();const body=new URLSearchParams({ssid:document.querySelector('#ssid').value,password:document.querySelector('#password').value});const r=await fetch('/wifi',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});document.querySelector('#network').textContent=await r.text()};

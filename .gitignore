@@ -1,0 +1,11 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+arduino/.pio/
+arduino/.vscode/
+image_data.h
+epaper_preview.png
+epaper_edges.png
+epaper_source_processed.png

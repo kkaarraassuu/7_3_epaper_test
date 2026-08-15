@@ -1,0 +1,7 @@
+#pragma once
+#include <Arduino.h>
+
+// convert_epaper.py が生成する arduino/src/image_data.h の形式例です。
+// 実データは 192,000 byte です。
+const uint8_t epaper_image[] PROGMEM = {0x11};
+const uint32_t epaper_image_size = 1;

@@ -142,6 +142,7 @@ pio device monitor
 
 シリアルモニターは115200 baudです。起動後にSSIDとURLが表示されます。画像受信後は転送の
 進捗、BUSY解除、更新完了が表示されます。受信した画像はLittleFSへ保存されます。
+`arduino/partitions.csv`でNano ESP32の16MB Flashに画像保存用領域を確保しています。
 
 ## データ形式
 

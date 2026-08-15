@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <LittleFS.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include <SPI.h>
@@ -17,12 +16,10 @@ constexpr size_t IMAGE_BYTES = EPD_WIDTH * EPD_HEIGHT / 2;
 
 constexpr char AP_SSID[] = "Spectra6-Frame";
 constexpr char AP_PASSWORD[] = "spectra6";  // 8文字以上必要
-constexpr char IMAGE_PATH[] = "/image.bin";
-constexpr char TEMP_PATH[] = "/upload.tmp";
-
 WebServer server(80);
 Preferences preferences;
-File uploadFile;
+uint8_t* uploadBuffer = nullptr;
+size_t uploadBytes = 0;
 bool uploadOk = false;
 String uploadError;
 
@@ -186,27 +183,20 @@ void sleepDisplay() {
   sendCommand(0x07); sendData(0xA5);
 }
 
-bool displayStoredImage() {
-  File image = LittleFS.open(IMAGE_PATH, "r");
-  if (!image || image.size() != IMAGE_BYTES) {
-    Serial.println("stored image is missing or invalid");
-    if (image) image.close();
+bool displayUploadedImage(const uint8_t* image, size_t imageSize) {
+  if (image == nullptr || imageSize != IMAGE_BYTES) {
+    Serial.println("uploaded image is missing or invalid");
     return false;
   }
   SPI.beginTransaction(SPISettings(4000000, MSBFIRST, SPI_MODE0));
-  if (!initDisplay()) { SPI.endTransaction(); image.close(); return false; }
+  if (!initDisplay()) { SPI.endTransaction(); return false; }
   sendCommand(0x10);
-  uint8_t buffer[1024];
-  size_t sent = 0;
-  while (image.available()) {
-    const size_t count = image.read(buffer, sizeof(buffer));
-    for (size_t i = 0; i < count; ++i) sendData(buffer[i]);
-    sent += count;
-    if (sent % 19200 < sizeof(buffer)) Serial.printf("transfer: %u%%\n", unsigned(sent * 100 / IMAGE_BYTES));
-    yield();
+  for (size_t i = 0; i < imageSize; ++i) {
+    sendData(image[i]);
+    if (i % 19200 == 0) Serial.printf("transfer: %u%%\n", unsigned(i * 100 / IMAGE_BYTES));
+    if (i % 4096 == 0) yield();
   }
-  image.close();
-  const bool ok = sent == IMAGE_BYTES && refreshDisplay();
+  const bool ok = refreshDisplay();
   sleepDisplay();
   SPI.endTransaction();
   return ok;
@@ -217,32 +207,27 @@ void handleUploadData() {
   if (upload.status == UPLOAD_FILE_START) {
     uploadOk = false;
     uploadError = "";
-    LittleFS.remove(TEMP_PATH);
-    uploadFile = LittleFS.open(TEMP_PATH, "w");
-    if (!uploadFile) uploadError = "一時ファイルを作成できません。";
+    uploadBytes = 0;
+    if (uploadBuffer != nullptr) free(uploadBuffer);
+    uploadBuffer = static_cast<uint8_t*>(ps_malloc(IMAGE_BYTES));
+    if (uploadBuffer == nullptr) uploadError = "画像用PSRAMを確保できません。";
   } else if (upload.status == UPLOAD_FILE_WRITE) {
-    if (uploadFile && uploadError.isEmpty()) {
-      if (uploadFile.size() + upload.currentSize > IMAGE_BYTES ||
-          uploadFile.write(upload.buf, upload.currentSize) != upload.currentSize) {
-        uploadError = "画像データの保存に失敗しました。";
+    if (uploadBuffer != nullptr && uploadError.isEmpty()) {
+      if (uploadBytes + upload.currentSize > IMAGE_BYTES) uploadError = "画像データが大きすぎます。";
+      else {
+        memcpy(uploadBuffer + uploadBytes, upload.buf, upload.currentSize);
+        uploadBytes += upload.currentSize;
       }
     }
   } else if (upload.status == UPLOAD_FILE_END) {
-    if (uploadFile) uploadFile.close();
-    File check = LittleFS.open(TEMP_PATH, "r");
-    const size_t size = check ? check.size() : 0;
-    if (check) check.close();
-    if (uploadError.isEmpty() && size == IMAGE_BYTES) {
-      LittleFS.remove(IMAGE_PATH);
-      uploadOk = LittleFS.rename(TEMP_PATH, IMAGE_PATH);
-      if (!uploadOk) uploadError = "画像ファイルを確定できません。";
-    } else if (uploadError.isEmpty()) {
+    if (uploadError.isEmpty() && uploadBytes == IMAGE_BYTES) uploadOk = true;
+    else if (uploadError.isEmpty()) {
       uploadError = "データサイズが不正です。";
     }
-    if (!uploadOk) LittleFS.remove(TEMP_PATH);
+    if (!uploadOk && uploadBuffer != nullptr) { free(uploadBuffer); uploadBuffer = nullptr; }
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
-    if (uploadFile) uploadFile.close();
-    LittleFS.remove(TEMP_PATH);
+    if (uploadBuffer != nullptr) { free(uploadBuffer); uploadBuffer = nullptr; }
+    uploadBytes = 0;
     uploadError = "アップロードが中断されました。";
   }
 }
@@ -254,7 +239,10 @@ void finishUpload() {
   }
   server.send(200, "text/plain; charset=utf-8", "受信完了。e-Paperを更新しています… 約25秒お待ちください。");
   delay(100);
-  const bool ok = displayStoredImage();
+  const bool ok = displayUploadedImage(uploadBuffer, uploadBytes);
+  free(uploadBuffer);
+  uploadBuffer = nullptr;
+  uploadBytes = 0;
   Serial.println(ok ? "display complete" : "display failed");
 }
 }  // namespace
@@ -281,10 +269,6 @@ void setup() {
   }
   Serial.printf("Setup Wi-Fi ready: %s\n", AP_SSID);
   Serial.printf("Setup page: http://%s/\n", WiFi.softAPIP().toString().c_str());
-  if (!LittleFS.begin(true)) {
-    Serial.println("LittleFS mount failed");
-    return;
-  }
   server.on("/", HTTP_GET, []() { server.send_P(200, "text/html; charset=utf-8", INDEX_HTML); });
   server.on("/status", HTTP_GET, []() {
     const bool connected = WiFi.status() == WL_CONNECTED;

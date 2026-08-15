@@ -261,7 +261,10 @@ void finishUpload() {
 
 void setup() {
   Serial.begin(115200);
-  delay(1000);
+  const uint32_t serialStarted = millis();
+  while (!Serial && millis() - serialStarted < 3000) delay(10);
+  Serial.println();
+  Serial.println("Booting Spectra 6 photo frame...");
   pinMode(PIN_BUSY, INPUT);
   pinMode(PIN_RST, OUTPUT);
   pinMode(PIN_DC, OUTPUT);
@@ -271,13 +274,15 @@ void setup() {
   digitalWrite(PIN_CS, HIGH);
   SPI.begin();  // Nano ESP32: D11=MOSI, D13=SCK
 
-  if (!LittleFS.begin(true)) {
-    Serial.println("LittleFS mount failed");
-    return;
-  }
   WiFi.mode(WIFI_AP_STA);
   if (!WiFi.softAP(AP_SSID, AP_PASSWORD)) {
     Serial.println("Wi-Fi access point failed");
+    return;
+  }
+  Serial.printf("Setup Wi-Fi ready: %s\n", AP_SSID);
+  Serial.printf("Setup page: http://%s/\n", WiFi.softAPIP().toString().c_str());
+  if (!LittleFS.begin(true)) {
+    Serial.println("LittleFS mount failed");
     return;
   }
   server.on("/", HTTP_GET, []() { server.send_P(200, "text/html; charset=utf-8", INDEX_HTML); });
